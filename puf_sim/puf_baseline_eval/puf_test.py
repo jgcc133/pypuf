@@ -1,15 +1,15 @@
 """Population-level baseline evaluation entry points."""
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 from pypuf.io import ChallengeResponseSet
 from pypuf.simulation import Simulation
 
 from puf_sim.puf_implementations import create_puf
-from puf_sim.puf_implementations.factory import PUF_IMPLEMENTATIONS
-
 from .report import evaluate_exposed_metrics
+from puf_sim.reports_baseline_eval.writer import save_baseline_report
 
 DEFAULT_PUF_FAMILIES = (
     "optical",
@@ -51,6 +51,8 @@ def run_baseline_experiment(
     k: int = 2,
     response_bits: int = 1,
     noisiness: float = 0.0,
+    report_root: Optional[Path | str] = None,
+    save_report: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """Evaluate the baseline metrics for a population of each PUF family.
 
@@ -81,6 +83,26 @@ def run_baseline_experiment(
             repetitions=repetitions,
             input_noise=input_noise,
             seed=seed + family_index,
+        )
+
+    if save_report:
+        parameters = {
+            "instances_per_family": instances_per_family,
+            "n": n,
+            "samples": samples,
+            "repetitions": repetitions,
+            "input_noise": input_noise,
+            "seed": seed,
+            "k": k,
+            "response_bits": response_bits,
+            "noisiness": noisiness,
+            "default_families": DEFAULT_PUF_FAMILIES,
+        }
+        save_baseline_report(
+            results,
+            parameters=parameters,
+            families=selected_families,
+            report_root=report_root,
         )
 
     return results

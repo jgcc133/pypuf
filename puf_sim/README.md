@@ -120,6 +120,56 @@ print(
 )
 ```
 
+Every `run_baseline_experiment()` call also saves `parameters.json`,
+`results.json`, and `summary.csv` under
+`puf_sim/reports_baseline_eval/yyyy mm dd Report x - All PUFs - parameters and values`.
+See [reports_baseline_eval/README.md](reports_baseline_eval/README.md) for
+the report format and options for selected-family runs.
+
+#### Baseline report output
+
+The report directory includes the run parameters in its name, for example:
+
+```text
+puf_sim/reports_baseline_eval/
+└── 2026 09 21 Report 1 - All PUFs - instances_per_family=100 - n=64 - samples=1000 - repetitions=17/
+    ├── parameters.json
+    ├── results.json
+    └── summary.csv
+```
+
+To save a selected-family experiment in a custom location:
+
+```python
+from pathlib import Path
+from puf_sim.puf_baseline_eval import run_baseline_experiment
+
+results = run_baseline_experiment(
+    families=["arbiter", "xor_apuf"],
+    instances_per_family=100,
+    n=64,
+    samples=1000,
+    repetitions=17,
+    seed=20260921,
+    report_root=Path("study_reports"),
+)
+```
+
+This creates a folder labelled `Selected PUFs`. Use `save_report=False` when
+you want the results returned in memory without writing files:
+
+```python
+results = run_baseline_experiment(
+    families=["arbiter"],
+    instances_per_family=100,
+    save_report=False,
+)
+```
+
+`parameters.json` stores the complete configuration, `results.json` stores
+the complete metric arrays, and `summary.csv` provides one spreadsheet-friendly
+row per family.
+
 ### Run the 100-instance all-family baseline in PowerShell
 
 The following command calls `run_baseline_experiment()` for all ten canonical

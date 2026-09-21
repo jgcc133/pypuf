@@ -145,8 +145,7 @@ python -m puf_sim.puf_implementations `
 
 The command prints the selected family, challenge count, response width, and
 response array shape. It is intended as a quick integration check; detailed
-metric evaluation is provided by `puf_sim.eval_utils` and
-`puf_sim.puf_test`.
+metric evaluation is provided by `puf_sim.puf_baseline_eval`.
 
 ## Permutation PUF note
 
