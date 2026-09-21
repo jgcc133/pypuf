@@ -2,7 +2,7 @@ import numpy as np
 
 from pypuf.simulation import Simulation
 from puf_sim import evaluate_puf_population
-from puf_sim.eval_utils import (
+from puf_sim.puf_baseline_eval import (
     binary_entropy,
     hamming_distance_distribution,
     probability_of_misidentification,
