@@ -142,3 +142,7 @@ cython_debug/
 
 # scratch folder
 scratch/
+
+# Generated baseline evaluation reports
+/puf_sim/reports_baseline_eval/*
+!/puf_sim/reports_baseline_eval/README.md

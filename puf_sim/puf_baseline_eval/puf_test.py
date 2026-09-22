@@ -9,7 +9,7 @@ from pypuf.simulation import Simulation
 
 from puf_sim.puf_implementations import create_puf
 from .report import evaluate_exposed_metrics
-from puf_sim.reports_baseline_eval.writer import save_baseline_report
+from .writer import save_baseline_report
 
 DEFAULT_PUF_FAMILIES = (
     "optical",
@@ -63,8 +63,11 @@ def run_baseline_experiment(
         raise ValueError("instances_per_family must be at least one.")
     selected_families = tuple(families or DEFAULT_PUF_FAMILIES)
     results: Dict[str, Dict[str, Any]] = {}
+    print(f"Running baseline evaluation for {len(selected_families)} families...")
+    print(f"Expected number of computations: {len(selected_families) * instances_per_family}*{samples}*{repetitions} = {len(selected_families) * instances_per_family * samples * repetitions}")
 
     for family_index, family in enumerate(selected_families):
+        print(f"Evaluating {instances_per_family} instances of {family!r}...")
         population = [
             create_puf(
                 family,

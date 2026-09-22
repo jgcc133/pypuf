@@ -4,8 +4,8 @@
 folder:
 
 ```text
-puf_sim/reports_baseline_eval/
-└── yyyy mm dd Report x - All PUFs - parameters and values/
+puf_sim/reports_baseline_val/
+└── yyyy mm dd Report x - All PUFs/
     ├── parameters.json
     ├── results.json
     └── summary.csv
@@ -13,7 +13,7 @@ puf_sim/reports_baseline_eval/
 
 For a selected family subset, the folder label is `Selected PUFs` instead of
 `All PUFs`. The folder name includes the date, sequential report number, and
-these parameter values:
+family selection. Parameter values are stored in `parameters.json`:
 
 - `instances_per_family`
 - `n`

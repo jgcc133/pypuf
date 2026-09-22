@@ -122,7 +122,7 @@ print(
 
 Every `run_baseline_experiment()` call also saves `parameters.json`,
 `results.json`, and `summary.csv` under
-`puf_sim/reports_baseline_eval/yyyy mm dd Report x - All PUFs - parameters and values`.
+`puf_sim/reports_baseline_val/yyyy mm dd Report x - All PUFs`.
 See [reports_baseline_eval/README.md](reports_baseline_eval/README.md) for
 the report format and options for selected-family runs.
 
@@ -131,8 +131,8 @@ the report format and options for selected-family runs.
 The report directory includes the run parameters in its name, for example:
 
 ```text
-puf_sim/reports_baseline_eval/
-└── 2026 09 21 Report 1 - All PUFs - instances_per_family=100 - n=64 - samples=1000 - repetitions=17/
+puf_sim/reports_baseline_val/
+└── 2026 09 21 Report 1 - All PUFs/
     ├── parameters.json
     ├── results.json
     └── summary.csv

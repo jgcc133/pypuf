@@ -14,12 +14,14 @@ from .puf_test import (
     run_baseline_experiment,
 )
 from .report import evaluate_exposed_metrics
+from .writer import DEFAULT_REPORT_ROOT, save_baseline_report
 
 __all__ = [
     "binary_entropy",
     "bit_aliasing",
     "DEFAULT_INSTANCE_COUNT",
     "DEFAULT_PUF_FAMILIES",
+    "DEFAULT_REPORT_ROOT",
     "evaluate_exposed_api",
     "evaluate_exposed_metrics",
     "evaluate_puf_population",
@@ -27,4 +29,5 @@ __all__ = [
     "probability_of_misidentification",
     "response_matrix",
     "run_baseline_experiment",
+    "save_baseline_report",
 ]
