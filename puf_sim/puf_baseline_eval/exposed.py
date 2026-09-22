@@ -46,7 +46,7 @@ def evaluate_exposed_api(
         "reliability": np.asarray(
             reliability(instance, seed=seed + 3, N=samples, r=repetitions)
         ),
-        "uniqueness": None,
+        "uniqueness": np.array([], dtype=float),
         "similarity": None,
         "accuracy": None,
         "correlation": None,

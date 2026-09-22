@@ -7,13 +7,31 @@ The package is organized into two submodules:
 
 - `puf_sim.puf_implementations`: native `pypuf` PUFs and analytical models for
   the requested PUF families.
-- `puf_sim.puf_baseline_eval`: official `pypuf.metrics` calls plus derived
   baseline metrics such as uniformity, entropy-based randomness, bit aliasing,
   diffuseness, Hamming-distance distributions, and probability of
   misidentification.
+ `puf_sim.puf_backend`: optional NumPy/Intel XPU backend selection. Native
+ `pypuf` families remain CPU-based; analytical families and derived response
+ metrics can use an XPU-enabled PyTorch installation.
 
 ## Use cases
 
+To use the optional GPU backend for analytical families and derived metrics:
+
+```powershell
+& ".\puf_env\Scripts\python.exe" -c "from puf_sim.puf_baseline_eval import run_baseline_experiment; results=run_baseline_experiment(families=['ring_oscillator','sram','memristive','silicon_photonic'], instances_per_family=100, n=64, samples=1000, repetitions=17, seed=20260923, workers=4, backend='torch_xpu', device=0, batch_size=16, report_root='reports'); [print(family, report['backend'], report['device']) for family, report in results.items()]"
+```
+
+Check GPU availability before running:
+
+```powershell
+& ".\puf_env\Scripts\python.exe" -m puf_sim.puf_backend
+```
+
+If XPU support is unavailable, install an Intel XPU-enabled PyTorch build and
+the Intel GPU runtime required by that build. After installation, restart the
+PowerShell session or reactivate the environment so the new package is visible
+to the Python process.
 ### 1. Generate simulated PUF family instances
 
 Use `create_puf()` to create one instance from a common factory interface:
@@ -173,18 +191,18 @@ row per family.
 ### Run the 100-instance all-family baseline in PowerShell
 
 The following command calls `run_baseline_experiment()` for all ten canonical
-families, using 100 independently seeded instances per family. It prints the
-main baseline metrics for each family:
+families, using 100 independently seeded instances per family and four
+parallel family workers. It prints the main baseline metrics for each family:
 
 ```powershell
-& ".\puf_env\Scripts\python.exe" -c "from puf_sim.puf_baseline_eval import run_baseline_experiment; results=run_baseline_experiment(instances_per_family=100, n=64, samples=1000, repetitions=17, seed=20260921); [print(f'{family}: uniqueness={report[\"uniqueness\"].mean():.4f} steadiness={report[\"steadiness\"].mean():.4f} reliability={report[\"reliability\"].mean():.4f} uniformity={report[\"uniformity\"]:.4f} randomness={report[\"randomness\"]:.4f} bit_aliasing={report[\"bit_aliasing\"]:.4f} diffuseness={report[\"diffuseness\"]:.4f} misidentification={report[\"probability_of_misidentification\"]:.6f}') for family, report in results.items()]"
+& ".\puf_env\Scripts\python.exe" -c "from puf_sim.puf_baseline_eval import run_baseline_experiment; results=run_baseline_experiment(instances_per_family=100, n=64, samples=1000, repetitions=17, seed=20260921, workers=4); [print(f'{family}: uniqueness={report[\"uniqueness\"].mean():.4f} steadiness={report[\"steadiness\"].mean():.4f} reliability={report[\"reliability\"].mean():.4f} uniformity={report[\"uniformity\"]:.4f} randomness={report[\"randomness\"]:.4f} bit_aliasing={report[\"bit_aliasing\"]:.4f} diffuseness={report[\"diffuseness\"]:.4f} misidentification={report[\"probability_of_misidentification\"]:.6f}') for family, report in results.items()]"
 ```
 
 For a quicker smoke run, reduce the challenge sample count and repeated
 evaluations while retaining 100 instances per family:
 
 ```powershell
-& ".\puf_env\Scripts\python.exe" -c "from puf_sim.puf_baseline_eval import run_baseline_experiment; results=run_baseline_experiment(instances_per_family=100, n=64, samples=32, repetitions=3, seed=20260921); [print(family, report['uniformity'], report['randomness']) for family, report in results.items()]"
+& ".\puf_env\Scripts\python.exe" -c "from puf_sim.puf_baseline_eval import run_baseline_experiment; results=run_baseline_experiment(instances_per_family=100, n=64, samples=32, repetitions=3, seed=20260921, workers=4); [print(family, report['uniformity'], report['randomness']) for family, report in results.items()]"
 ```
 
 For a full study, repeat the same operation for every family:

@@ -1,68 +1,83 @@
 """Derived response-data metrics not directly exposed by pypuf."""
 from __future__ import annotations
 
-from itertools import combinations
-
 import numpy as np
 
+from puf_sim.puf_backend import Backend, get_backend
 
-def response_matrix(responses: np.ndarray) -> np.ndarray:
+
+def response_matrix(responses: np.ndarray, backend: Backend | None = None):
     """Return responses as ``(samples, response_bits)`` in ``{-1, 1}``."""
-    values = np.asarray(responses)
+    backend = backend or get_backend("numpy")
+    xp = backend.xp
+    values = backend.asarray(responses)
     if values.ndim == 1:
         values = values.reshape(-1, 1)
     elif values.ndim == 3:
-        values = np.sign(np.mean(values, axis=-1))
+        values = xp.sign(xp.mean(values, axis=-1))
     if values.ndim != 2:
         raise ValueError("Responses must have one, two, or three dimensions.")
-    return np.where(values >= 0, 1, -1).astype(np.int8)
+    return xp.where(values >= 0, 1, -1).astype(xp.int8)
 
 
-def binary_entropy(responses: np.ndarray) -> float:
+def binary_entropy(responses: np.ndarray, backend: Backend | None = None) -> float:
     """Return mean Shannon entropy of response bits, normalized to ``[0, 1]``."""
-    values = response_matrix(responses)
-    probability_one = np.mean(values == 1, axis=0)
-    terms = np.zeros_like(probability_one, dtype=float)
+    backend = backend or get_backend("numpy")
+    xp = backend.xp
+    values = response_matrix(responses, backend)
+    probability_one = xp.mean(values == 1, axis=0)
+    terms = xp.zeros_like(probability_one, dtype=xp.float32)
     non_deterministic = (probability_one > 0) & (probability_one < 1)
     probability = probability_one[non_deterministic]
     terms[non_deterministic] = -(
-        probability * np.log2(probability)
-        + (1 - probability) * np.log2(1 - probability)
+        probability * xp.log2(probability)
+        + (1 - probability) * xp.log2(1 - probability)
     )
-    return float(np.mean(terms))
+    return float(backend.asnumpy(xp.mean(terms)))
 
 
-def hamming_distance_distribution(responses: np.ndarray) -> np.ndarray:
+def hamming_distance_distribution(responses: np.ndarray, backend: Backend | None = None) -> np.ndarray:
     """Return normalized pairwise Hamming distances between response rows."""
-    values = response_matrix(responses)
-    return np.asarray(
-        [np.mean(left != right) for left, right in combinations(values, 2)],
-        dtype=float,
-    )
+    backend = backend or get_backend("numpy")
+    xp = backend.xp
+    values = response_matrix(responses, backend)
+    pair_distances = []
+    for left_index in range(values.shape[0] - 1):
+        distances = xp.mean(values[left_index + 1:] != values[left_index], axis=1)
+        pair_distances.append(distances)
+    if not pair_distances:
+        return np.array([], dtype=float)
+    return backend.asnumpy(xp.concatenate(pair_distances))
 
 
-def bit_aliasing(responses: np.ndarray) -> float:
+def bit_aliasing(responses: np.ndarray, backend: Backend | None = None) -> float:
     """Return mean absolute response-bit bias; zero is ideal.
 
     ``responses`` must have shape ``(devices, challenges, response_bits)``.
     """
-    values = np.asarray(responses)
+    backend = backend or get_backend("numpy")
+    xp = backend.xp
+    values = backend.asarray(responses)
     if values.ndim != 3:
         raise ValueError("Bit aliasing expects (devices, challenges, response_bits).")
-    values = np.where(values >= 0, 1, -1)
-    return float(np.mean(np.abs(np.mean(values, axis=(0, 1)))))
+    values = xp.where(values >= 0, 1, -1)
+    return float(backend.asnumpy(xp.mean(xp.abs(xp.mean(values, axis=(0, 1))))))
 
 
-def probability_of_misidentification(responses: np.ndarray) -> float:
+def probability_of_misidentification(responses: np.ndarray, backend: Backend | None = None) -> float:
     """Return the average complete-response impostor collision probability."""
-    values = np.asarray(responses)
+    backend = backend or get_backend("numpy")
+    xp = backend.xp
+    values = backend.asarray(responses)
     if values.ndim != 3:
         raise ValueError("Misidentification expects (devices, challenges, response_bits).")
-    pair_rates = [
-        float(np.mean(np.all(values[left] == values[right], axis=1)))
-        for left, right in combinations(range(values.shape[0]), 2)
-    ]
-    return float(np.mean(pair_rates)) if pair_rates else 0.0
+    pair_rates = []
+    for left_index in range(values.shape[0] - 1):
+        matches = xp.all(values[left_index + 1:] == values[left_index], axis=2)
+        pair_rates.append(xp.mean(matches, axis=1))
+    if not pair_rates:
+        return 0.0
+    return float(backend.asnumpy(xp.mean(xp.concatenate(pair_rates))))
 
 
 __all__ = [

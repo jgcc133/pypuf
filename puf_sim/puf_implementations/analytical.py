@@ -5,6 +5,8 @@ import numpy as np
 
 from pypuf.simulation import Simulation
 
+from puf_sim.puf_backend import Backend
+
 
 class RingOscillatorPUF(Simulation):
     """Analytical ring-oscillator PUF based on challenge-selected frequencies."""
@@ -28,6 +30,12 @@ class RingOscillatorPUF(Simulation):
         values = np.asarray(challenges, dtype=float) @ self.frequencies + self.offsets
         return np.where(values >= 0, 1, -1).astype(np.int8)
 
+    def eval_backend(self, challenges: np.ndarray, backend: Backend):
+        xp = backend.xp
+        values = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(self.frequencies)
+        values = values + backend.asarray(self.offsets)
+        return xp.where(values >= 0, 1, -1).astype(xp.int8)
+
 
 class StaticRandomAccessMemoryPUF(Simulation):
     """Analytical SRAM PUF represented by a device-specific power-up state."""
@@ -49,6 +57,11 @@ class StaticRandomAccessMemoryPUF(Simulation):
     def eval(self, challenges: np.ndarray) -> np.ndarray:
         count = np.asarray(challenges).shape[0]
         return np.broadcast_to(self.power_up_state, (count, self.m)).copy()
+
+    def eval_backend(self, challenges: np.ndarray, backend: Backend):
+        xp = backend.xp
+        count = challenges.shape[0]
+        return xp.broadcast_to(backend.asarray(self.power_up_state), (count, self.m)).copy()
 
 
 class MemristivePUF(Simulation):
@@ -73,6 +86,12 @@ class MemristivePUF(Simulation):
         values = np.asarray(challenges, dtype=float) @ self.conductance
         values = np.tanh(values) - self.threshold
         return np.where(values >= 0, 1, -1).astype(np.int8)
+
+    def eval_backend(self, challenges: np.ndarray, backend: Backend):
+        xp = backend.xp
+        values = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(self.conductance)
+        values = xp.tanh(values) - backend.asarray(self.threshold)
+        return xp.where(values >= 0, 1, -1).astype(xp.int8)
 
 
 class SiliconPhotonicPUF(Simulation):
@@ -99,6 +118,12 @@ class SiliconPhotonicPUF(Simulation):
         optical_field = np.asarray(challenges, dtype=float) @ self.transfer_matrix
         intensity = np.abs(optical_field) ** 2
         return np.where(intensity >= self.reference, 1, -1).astype(np.int8)
+
+    def eval_backend(self, challenges: np.ndarray, backend: Backend):
+        xp = backend.xp
+        optical_field = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(self.transfer_matrix)
+        intensity = xp.abs(optical_field) ** 2
+        return xp.where(intensity >= backend.asarray(self.reference), 1, -1).astype(xp.int8)
 
 
 __all__ = [

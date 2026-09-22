@@ -1,6 +1,8 @@
 """Population-level baseline evaluation entry points."""
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Sequence
 
@@ -24,6 +26,49 @@ DEFAULT_PUF_FAMILIES = (
     "silicon_photonic",
 )
 DEFAULT_INSTANCE_COUNT = 100
+
+
+def _evaluate_family(
+    family_index: int,
+    family: str,
+    instances_per_family: int,
+    n: int,
+    samples: int,
+    repetitions: int,
+    input_noise: float,
+    seed: int,
+    k: int,
+    response_bits: int,
+    noisiness: float,
+    backend: str,
+    device: Optional[int],
+    batch_size: Optional[int],
+) -> tuple[str, Dict[str, Any]]:
+    """Create and evaluate one family; suitable for a worker thread."""
+    print(f"Evaluating {instances_per_family} instances of {family!r}...")
+    population = [
+        create_puf(
+            family,
+            n=n,
+            seed=seed + family_index * instances_per_family + device_index,
+            k=k,
+            response_bits=response_bits,
+            noisiness=noisiness,
+        )
+        for device_index in range(instances_per_family)
+    ]
+    report = evaluate_exposed_metrics(
+        population[0],
+        instances=population,
+        samples=samples,
+        repetitions=repetitions,
+        input_noise=input_noise,
+        seed=seed + family_index,
+        backend=backend,
+        device=device,
+        batch_size=batch_size,
+    )
+    return family, report
 
 
 def evaluate_puf_population(
@@ -53,6 +98,10 @@ def run_baseline_experiment(
     noisiness: float = 0.0,
     report_root: Optional[Path | str] = None,
     save_report: bool = True,
+    workers: Optional[int] = None,
+    backend: str = "numpy",
+    device: Optional[int] = None,
+    batch_size: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Evaluate the baseline metrics for a population of each PUF family.
 
@@ -62,31 +111,37 @@ def run_baseline_experiment(
     if instances_per_family < 1:
         raise ValueError("instances_per_family must be at least one.")
     selected_families = tuple(families or DEFAULT_PUF_FAMILIES)
+    if workers is not None and workers < 1:
+        raise ValueError("workers must be at least one or None.")
+    max_workers = workers or min(len(selected_families), os.cpu_count() or 1)
     results: Dict[str, Dict[str, Any]] = {}
     print(f"Running baseline evaluation for {len(selected_families)} families...")
+    print(f"Using {max_workers} family worker(s).")
     print(f"Expected number of computations: {len(selected_families) * instances_per_family}*{samples}*{repetitions} = {len(selected_families) * instances_per_family * samples * repetitions}")
 
-    for family_index, family in enumerate(selected_families):
-        print(f"Evaluating {instances_per_family} instances of {family!r}...")
-        population = [
-            create_puf(
-                family,
-                n=n,
-                seed=seed + family_index * instances_per_family + device_index,
-                k=k,
-                response_bits=response_bits,
-                noisiness=noisiness,
-            )
-            for device_index in range(instances_per_family)
-        ]
-        results[family] = evaluate_exposed_metrics(
-            population[0],
-            instances=population,
-            samples=samples,
-            repetitions=repetitions,
-            input_noise=input_noise,
-            seed=seed + family_index,
+    worker_arguments = [
+        (
+            family_index,
+            family,
+            instances_per_family,
+            n,
+            samples,
+            repetitions,
+            input_noise,
+            seed,
+            k,
+            response_bits,
+            noisiness,
+            backend,
+            device,
+            batch_size,
         )
+        for family_index, family in enumerate(selected_families)
+    ]
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        completed = executor.map(lambda args: _evaluate_family(*args), worker_arguments)
+        for family, report in completed:
+            results[family] = report
 
     if save_report:
         parameters = {
@@ -99,6 +154,10 @@ def run_baseline_experiment(
             "k": k,
             "response_bits": response_bits,
             "noisiness": noisiness,
+            "workers": max_workers,
+            "backend": backend,
+            "device": device,
+            "batch_size": batch_size,
             "default_families": DEFAULT_PUF_FAMILIES,
         }
         save_baseline_report(
