@@ -36,8 +36,17 @@ class Backend:
 
     def asnumpy(self, value: Any) -> np.ndarray:
         if self.name == "torch_xpu":
-            return value.detach().cpu().numpy()
+            if isinstance(value, np.ndarray):
+                return value
+            if torch is not None and isinstance(value, torch.Tensor):
+                return value.detach().cpu().numpy()
         return np.asarray(value)
+
+    def astype(self, value: Any, dtype: Any) -> Any:
+        """Cast an array or tensor using the selected backend's API."""
+        if self.name == "torch_xpu":
+            return value.to(dtype=dtype)
+        return value.astype(dtype)
 
     def eval_array(self, instance: Any, challenges: Any) -> Any:
         """Evaluate an instance on the selected backend when supported."""

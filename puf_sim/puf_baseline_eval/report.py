@@ -74,11 +74,15 @@ def evaluate_exposed_metrics(
             selected_backend,
         ),
         "hamming_distance_distribution": hamming_distance_distribution(
-            population_responses.reshape(-1, instance.response_length),
+            population_responses,
             selected_backend,
         ),
         "backend": selected_backend.name,
-        "device": selected_backend.device,
+        "device": (
+            None
+            if selected_backend.device is None
+            else str(selected_backend.device)
+        ),
         "batch_size": step,
     })
     result["steadiness"] = result["reliability"]

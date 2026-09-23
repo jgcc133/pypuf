@@ -32,9 +32,12 @@ class RingOscillatorPUF(Simulation):
 
     def eval_backend(self, challenges: np.ndarray, backend: Backend):
         xp = backend.xp
-        values = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(self.frequencies)
-        values = values + backend.asarray(self.offsets)
-        return xp.where(values >= 0, 1, -1).astype(xp.int8)
+        values = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(
+            self.frequencies,
+            dtype=xp.float32,
+        )
+        values = values + backend.asarray(self.offsets, dtype=xp.float32)
+        return backend.astype(xp.where(values >= 0, 1, -1), xp.int8)
 
 
 class StaticRandomAccessMemoryPUF(Simulation):
@@ -61,7 +64,8 @@ class StaticRandomAccessMemoryPUF(Simulation):
     def eval_backend(self, challenges: np.ndarray, backend: Backend):
         xp = backend.xp
         count = challenges.shape[0]
-        return xp.broadcast_to(backend.asarray(self.power_up_state), (count, self.m)).copy()
+        values = xp.broadcast_to(backend.asarray(self.power_up_state), (count, self.m))
+        return values.clone() if backend.name == "torch_xpu" else values.copy()
 
 
 class MemristivePUF(Simulation):
@@ -89,9 +93,12 @@ class MemristivePUF(Simulation):
 
     def eval_backend(self, challenges: np.ndarray, backend: Backend):
         xp = backend.xp
-        values = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(self.conductance)
-        values = xp.tanh(values) - backend.asarray(self.threshold)
-        return xp.where(values >= 0, 1, -1).astype(xp.int8)
+        values = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(
+            self.conductance,
+            dtype=xp.float32,
+        )
+        values = xp.tanh(values) - backend.asarray(self.threshold, dtype=xp.float32)
+        return backend.astype(xp.where(values >= 0, 1, -1), xp.int8)
 
 
 class SiliconPhotonicPUF(Simulation):
@@ -121,9 +128,15 @@ class SiliconPhotonicPUF(Simulation):
 
     def eval_backend(self, challenges: np.ndarray, backend: Backend):
         xp = backend.xp
-        optical_field = backend.asarray(challenges, dtype=xp.float32) @ backend.asarray(self.transfer_matrix)
+        optical_field = backend.asarray(challenges, dtype=xp.complex64) @ backend.asarray(
+            self.transfer_matrix,
+            dtype=xp.complex64,
+        )
         intensity = xp.abs(optical_field) ** 2
-        return xp.where(intensity >= backend.asarray(self.reference), 1, -1).astype(xp.int8)
+        return backend.astype(
+            xp.where(intensity >= backend.asarray(self.reference, dtype=xp.float32), 1, -1),
+            xp.int8,
+        )
 
 
 __all__ = [

@@ -17,7 +17,7 @@ def response_matrix(responses: np.ndarray, backend: Backend | None = None):
         values = xp.sign(xp.mean(values, axis=-1))
     if values.ndim != 2:
         raise ValueError("Responses must have one, two, or three dimensions.")
-    return xp.where(values >= 0, 1, -1).astype(xp.int8)
+    return backend.astype(xp.where(values >= 0, 1, -1), xp.int8)
 
 
 def binary_entropy(responses: np.ndarray, backend: Backend | None = None) -> float:
@@ -25,7 +25,10 @@ def binary_entropy(responses: np.ndarray, backend: Backend | None = None) -> flo
     backend = backend or get_backend("numpy")
     xp = backend.xp
     values = response_matrix(responses, backend)
-    probability_one = xp.mean(values == 1, axis=0)
+    probability_one = xp.mean(
+        backend.astype(values == 1, xp.float32),
+        axis=0,
+    )
     terms = xp.zeros_like(probability_one, dtype=xp.float32)
     non_deterministic = (probability_one > 0) & (probability_one < 1)
     probability = probability_one[non_deterministic]
@@ -37,13 +40,37 @@ def binary_entropy(responses: np.ndarray, backend: Backend | None = None) -> flo
 
 
 def hamming_distance_distribution(responses: np.ndarray, backend: Backend | None = None) -> np.ndarray:
-    """Return normalized pairwise Hamming distances between response rows."""
+    """Return normalized pairwise Hamming distances.
+
+    Two-dimensional input compares response rows directly. Three-dimensional
+    population input is shaped ``(devices, challenges, response_bits)`` and
+    returns one distance per device pair, averaged over challenges and bits.
+    """
     backend = backend or get_backend("numpy")
     xp = backend.xp
-    values = response_matrix(responses, backend)
+    values = backend.asarray(responses)
+    if values.ndim == 3:
+        values = backend.astype(xp.where(values >= 0, 1, -1), xp.float32)
+        pair_distances = []
+        for left_index in range(values.shape[0] - 1):
+            right_values = values[left_index + 1:]
+            distances = xp.mean(
+                (1.0 - right_values * values[left_index]) / 2.0,
+                axis=(1, 2),
+            )
+            pair_distances.append(distances)
+        if not pair_distances:
+            return np.array([], dtype=float)
+        return backend.asnumpy(xp.concatenate(pair_distances))
+
+    values = response_matrix(values, backend)
+    values = backend.astype(values, xp.float32)
     pair_distances = []
     for left_index in range(values.shape[0] - 1):
-        distances = xp.mean(values[left_index + 1:] != values[left_index], axis=1)
+        distances = xp.mean(
+            (1.0 - values[left_index + 1:] * values[left_index]) / 2.0,
+            axis=1,
+        )
         pair_distances.append(distances)
     if not pair_distances:
         return np.array([], dtype=float)
@@ -60,7 +87,7 @@ def bit_aliasing(responses: np.ndarray, backend: Backend | None = None) -> float
     values = backend.asarray(responses)
     if values.ndim != 3:
         raise ValueError("Bit aliasing expects (devices, challenges, response_bits).")
-    values = xp.where(values >= 0, 1, -1)
+    values = backend.astype(xp.where(values >= 0, 1, -1), xp.float32)
     return float(backend.asnumpy(xp.mean(xp.abs(xp.mean(values, axis=(0, 1))))))
 
 
@@ -74,7 +101,7 @@ def probability_of_misidentification(responses: np.ndarray, backend: Backend | N
     pair_rates = []
     for left_index in range(values.shape[0] - 1):
         matches = xp.all(values[left_index + 1:] == values[left_index], axis=2)
-        pair_rates.append(xp.mean(matches, axis=1))
+        pair_rates.append(xp.mean(backend.astype(matches, xp.float32), axis=1))
     if not pair_rates:
         return 0.0
     return float(backend.asnumpy(xp.mean(xp.concatenate(pair_rates))))
