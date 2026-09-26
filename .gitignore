@@ -146,3 +146,7 @@ scratch/
 # Generated baseline evaluation reports
 /puf_sim/reports_baseline_eval/*
 !/puf_sim/reports_baseline_eval/README.md
+
+# Generated machine-learning attack reports
+/puf_sim/reports_ml_attacks/*
+!/puf_sim/reports_ml_attacks/README.md

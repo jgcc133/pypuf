@@ -1,11 +1,12 @@
-"""Evaluation utilities for pypuf modeling attacks."""
+"""Evaluation utilities for user-provided pypuf modeling attacks."""
 from __future__ import annotations
 
 import time
+import importlib
+import tracemalloc
 from typing import Any, Dict, Optional
 
 import numpy as np
-from memory_profiler import memory_usage
 
 from pypuf.io import ChallengeResponseSet
 from pypuf.metrics import accuracy, correlation, similarity
@@ -24,10 +25,21 @@ def evaluate_attack(
         target, N=samples, seed=seed
     )
     start = time.perf_counter()
-    peak_memory, model = memory_usage(
-        (attack.fit, ()), interval=0.1, include_children=True,
-        retval=True, max_usage=True,
-    )
+    try:
+        profiler = importlib.import_module("memory_profiler")
+    except ImportError:
+        tracemalloc.start()
+        try:
+            model = attack.fit()
+            _, peak_bytes = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        peak_memory = peak_bytes / (1024 * 1024)
+    else:
+        peak_memory, model = profiler.memory_usage(
+            (attack.fit, ()), interval=0.1, include_children=True,
+            retval=True, max_usage=True,
+        )
     elapsed = time.perf_counter() - start
     if model is None:
         raise RuntimeError("The attack did not produce a model.")

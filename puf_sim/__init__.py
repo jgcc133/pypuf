@@ -1,6 +1,7 @@
 """Evaluation helpers built on top of pypuf."""
 from .puf_baseline_eval import evaluate_exposed_metrics
 from .puf_baseline_eval import evaluate_puf_population, run_baseline_experiment
+from .puf_ml_attack import run_ml_attack_experiment
 from .puf_implementations import create_puf
 
 __all__ = [
@@ -8,4 +9,5 @@ __all__ = [
 	"evaluate_exposed_metrics",
 	"evaluate_puf_population",
 	"run_baseline_experiment",
+	"run_ml_attack_experiment",
 ]
