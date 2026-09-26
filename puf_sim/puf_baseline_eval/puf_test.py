@@ -160,12 +160,13 @@ def run_baseline_experiment(
             "batch_size": batch_size,
             "default_families": DEFAULT_PUF_FAMILIES,
         }
-        save_baseline_report(
+        report_directory = save_baseline_report(
             results,
             parameters=parameters,
             families=selected_families,
             report_root=report_root,
         )
+        print(f"Saved baseline report to: {report_directory}")
 
     return results
 

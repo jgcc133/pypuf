@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
@@ -49,6 +50,9 @@ def save_baseline_report(
 ) -> Path:
     """Save one timestamped baseline report in the reports data directory."""
     root = DEFAULT_REPORT_ROOT if report_root is None else Path(report_root)
+    if os.name == "nt" and root.root and not root.drive:
+        project_root = DEFAULT_REPORT_ROOT.parents[1]
+        root = project_root / str(root).lstrip("/\\")
     root.mkdir(parents=True, exist_ok=True)
     report_number = 1 + sum(path.is_dir() for path in root.iterdir())
     date_label = datetime.now().strftime("%Y %m %d")
