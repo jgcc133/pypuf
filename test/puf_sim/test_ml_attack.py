@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+import puf_sim.puf_ml_attack.experiment as experiment
 from puf_sim.puf_ml_attack.experiment import _pair_accuracy
 from puf_sim.puf_ml_attack.writer import save_ml_attack_report
 
@@ -13,7 +14,15 @@ class EchoModel:
         return challenges[:, :1]
 
 
-def test_pair_accuracy_flattens_pypuf_response_axis():
+class FakeTorchModel:
+    def __init__(self, depth):
+        self.depth = depth
+
+    def cpu(self):
+        return self
+
+
+def test_pair_accuracy_flattens_responses():
     challenges = np.array([[1, -1], [-1, 1]], dtype=np.int8)
     dataset = SimpleNamespace(
         challenges=challenges,
@@ -23,7 +32,172 @@ def test_pair_accuracy_flattens_pypuf_response_axis():
     assert _pair_accuracy(EchoModel(), dataset) == 1.0
 
 
-def test_ml_attack_report_uses_scenario_and_baseline_file_layout(tmp_path):
+def test_train_until_threshold_reports_effort(monkeypatch, capsys):
+    class DatasetFactory:
+        @staticmethod
+        def from_simulation(target, N, seed):
+            return SimpleNamespace(
+                challenges=np.zeros((N, 1)),
+                responses=np.ones((N, 1)),
+                seed=seed,
+            )
+
+    class AgentTrainer:
+        def __init__(self, *args, **kwargs):
+            self.model = FakeTorchModel(args[3])
+
+        def train_epoch(self):
+            pass
+
+    class AttackModel:
+        def __init__(self, models, n, response_bits, device):
+            self.depth = models[0].depth
+
+    validation_scores = iter([0.4, 0.8, 0.95])
+    monkeypatch.setattr(experiment, "ChallengeResponseSet", DatasetFactory)
+    monkeypatch.setattr(experiment, "_AgentTrainer", AgentTrainer)
+    monkeypatch.setattr(experiment, "_TorchPUFModel", AttackModel)
+    monkeypatch.setattr(
+        experiment,
+        "_pair_accuracy",
+        lambda model, dataset: next(validation_scores, 0.95)
+        if dataset.seed == 11 else 0.98,
+    )
+
+    result = experiment._attack_one_puf(
+        SimpleNamespace(response_length=1),
+        n=1,
+        training_samples=1,
+        validation_samples=1,
+        test_samples=1,
+        seed=10,
+        success_threshold=0.95,
+        max_depth=0,
+        agents=1,
+        width=None,
+        epochs=3,
+        batch_size=1,
+        learning_rate=0.001,
+        device=SimpleNamespace(type="cpu"),
+        print_progress=True,
+    )
+
+    output = capsys.readouterr().out
+    assert result["threshold_reached"] is True
+    assert result["epochs_to_threshold"] == 3
+    assert result["epochs_trained"] == 3
+    assert result["time_to_threshold_seconds"] >= 0
+    assert result["test_accuracy"] == 0.98
+    assert "epoch 1/3, validation accuracy 40.0000%" in output
+    assert "epoch 3/3, validation accuracy 95.0000%" in output
+
+
+def test_epoch_limit_applies_at_each_depth(monkeypatch):
+    class DatasetFactory:
+        @staticmethod
+        def from_simulation(target, N, seed):
+            return SimpleNamespace(
+                challenges=np.zeros((N, 1)),
+                responses=np.ones((N, 1)),
+                seed=seed,
+            )
+
+    class AgentTrainer:
+        def __init__(self, *args, **kwargs):
+            self.model = FakeTorchModel(args[3])
+
+        def train_epoch(self):
+            pass
+
+    class AttackModel:
+        def __init__(self, models, n, response_bits, device):
+            self.depth = models[0].depth
+
+    monkeypatch.setattr(experiment, "ChallengeResponseSet", DatasetFactory)
+    monkeypatch.setattr(experiment, "_AgentTrainer", AgentTrainer)
+    monkeypatch.setattr(experiment, "_TorchPUFModel", AttackModel)
+    monkeypatch.setattr(experiment, "_pair_accuracy", lambda model, dataset: 0.5)
+
+    result = experiment._attack_one_puf(
+        SimpleNamespace(response_length=1),
+        n=1,
+        training_samples=1,
+        validation_samples=1,
+        test_samples=1,
+        seed=10,
+        success_threshold=1.0,
+        max_depth=2,
+        agents=2,
+        width=None,
+        epochs=3,
+        batch_size=1,
+        learning_rate=0.001,
+        device=SimpleNamespace(type="cpu"),
+    )
+
+    assert [stage["epochs"] for stage in result["stages"]] == [3, 3, 3]
+    assert result["epochs_trained"] == 9
+    assert result["epochs_per_depth_limit"] == 3
+
+
+def test_cohort_counts_exact_matches():
+    instance_results = [
+        {"test_accuracy": 0.99, "epochs_trained": 2, "fit_elapsed_seconds": 1.0,
+         "instance_matched": False},
+        {"test_accuracy": 1.0, "epochs_trained": 3, "fit_elapsed_seconds": 1.5,
+         "instance_matched": True},
+        {"test_accuracy": 1.0, "epochs_trained": 4, "fit_elapsed_seconds": 2.0,
+         "instance_matched": True},
+    ]
+
+    result = experiment._summarize_puf_instances(instance_results, success_threshold=0.66)
+
+    assert result["puf_instances"] == 3
+    assert result["matched_instances"] == 2
+    assert result["required_matches"] == 2
+    assert result["instance_match_rate"] == 2 / 3
+    assert result["success"] is True
+    assert result["instances_processed_to_threshold"] == 3
+    assert result["epochs_to_threshold"] == 9
+    assert result["time_to_threshold_seconds"] == 4.5
+
+
+def test_instances_are_independent_and_aggregated(monkeypatch):
+    created_seeds = []
+    test_scores = iter([1.0, 0.99, 1.0])
+
+    def create_target(family, **kwargs):
+        created_seeds.append(kwargs["seed"])
+        return SimpleNamespace(seed=kwargs["seed"])
+
+    def attack_target(target, *args):
+        assert args[5] == 0.66
+        return {
+            "test_accuracy": next(test_scores),
+            "epochs_trained": 1,
+            "fit_elapsed_seconds": 0.5,
+        }
+
+    monkeypatch.setattr(experiment, "create_puf", create_target)
+    monkeypatch.setattr(experiment, "_attack_one_puf", attack_target)
+    monkeypatch.setattr(experiment, "_resolve_device", lambda backend, device: "cpu")
+
+    results = experiment.run_ml_attack_experiment(
+        families=["arbiter"],
+        puf_instances=3,
+        success_threshold=0.66,
+        backend="cpu",
+        save_report=False,
+    )
+
+    result = results["arbiter"]
+    assert len(set(created_seeds)) == 3
+    assert result["matched_instances"] == 2
+    assert result["threshold_reached"] is True
+    assert result["epochs_to_threshold"] == 3
+
+
+def test_report_layout(tmp_path):
     results = {
         "arbiter": {
             "attack": "nonlinear_ensemble",

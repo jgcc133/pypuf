@@ -14,6 +14,7 @@ def main() -> None:
     parser.add_argument("--training-samples", type=int, default=10000)
     parser.add_argument("--validation-samples", type=int, default=2000)
     parser.add_argument("--test-samples", type=int, default=2000)
+    parser.add_argument("--puf-instances", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=20260926)
     parser.add_argument("--k", type=int, default=2)
     parser.add_argument("--response-bits", type=int, default=1)
@@ -29,6 +30,7 @@ def main() -> None:
     parser.add_argument("--device", type=int)
     parser.add_argument("--report-root")
     parser.add_argument("--no-save-report", action="store_true")
+    parser.add_argument("--print-progress", action="store_true")
     arguments = parser.parse_args()
     results = run_ml_attack_experiment(
         families=arguments.families,
@@ -52,11 +54,21 @@ def main() -> None:
         scenario=arguments.scenario,
         report_root=arguments.report_root,
         save_report=not arguments.no_save_report,
+        puf_instances=arguments.puf_instances,
+        print_progress=arguments.print_progress,
     )
     for family, result in results.items():
+        threshold_status = (
+            f"cohort threshold reached after {result['instances_processed_to_threshold']} "
+            f"instances, {result['epochs_to_threshold']} epochs / "
+            f"{result['time_to_threshold_seconds']:.2f}s"
+            if result["threshold_reached"]
+            else f"cohort threshold not reached in {result['epochs_trained']} epochs"
+        )
         print(
-            f"{family}: {result['test_accuracy']:.3%} test imitation; "
-            f"{result['attack']} depth={result['depth']} agents={result['agents']}"
+            f"{family}: {result['matched_instances']}/{result['puf_instances']} "
+            f"exact PUF matches ({result['instance_match_rate']:.3%}); "
+            f"{threshold_status}"
         )
 
 
