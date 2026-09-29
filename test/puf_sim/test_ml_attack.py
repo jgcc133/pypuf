@@ -57,6 +57,8 @@ def test_train_until_threshold_reports_effort(monkeypatch, capsys):
     monkeypatch.setattr(experiment, "ChallengeResponseSet", DatasetFactory)
     monkeypatch.setattr(experiment, "_AgentTrainer", AgentTrainer)
     monkeypatch.setattr(experiment, "_TorchPUFModel", AttackModel)
+    monkeypatch.setattr(experiment, "_ArbiterAgentTrainer", AgentTrainer)
+    monkeypatch.setattr(experiment, "_ArbiterTorchPUFModel", AttackModel)
     monkeypatch.setattr(
         experiment,
         "_pair_accuracy",
@@ -71,8 +73,9 @@ def test_train_until_threshold_reports_effort(monkeypatch, capsys):
         validation_samples=1,
         test_samples=1,
         seed=10,
+        family="arbiter",
         success_threshold=0.95,
-        max_depth=0,
+        max_depth=1,
         agents=1,
         width=None,
         epochs=3,
@@ -125,6 +128,7 @@ def test_epoch_limit_applies_at_each_depth(monkeypatch):
         validation_samples=1,
         test_samples=1,
         seed=10,
+        family="xor_apuf",
         success_threshold=1.0,
         max_depth=2,
         agents=2,
@@ -135,8 +139,9 @@ def test_epoch_limit_applies_at_each_depth(monkeypatch):
         device=SimpleNamespace(type="cpu"),
     )
 
-    assert [stage["epochs"] for stage in result["stages"]] == [3, 3, 3]
-    assert result["epochs_trained"] == 9
+    assert [stage["depth"] for stage in result["stages"]] == [1, 2]
+    assert [stage["epochs"] for stage in result["stages"]] == [3, 3]
+    assert result["epochs_trained"] == 6
     assert result["epochs_per_depth_limit"] == 3
 
 
@@ -172,6 +177,7 @@ def test_instances_are_independent_and_aggregated(monkeypatch):
 
     def attack_target(target, *args):
         assert args[5] == 0.66
+        assert args[13] == "arbiter"
         return {
             "test_accuracy": next(test_scores),
             "epochs_trained": 1,

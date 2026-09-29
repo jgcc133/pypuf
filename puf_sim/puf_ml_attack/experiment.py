@@ -13,7 +13,21 @@ from pypuf.simulation import Simulation
 
 from puf_sim.puf_implementations import PUF_IMPLEMENTATIONS, create_puf
 
+from . import arbiter as _arbiter
+from . import optical as _optical
+from .common import (
+    AgentTrainer as _AgentTrainer,
+    TorchPUFModel as _TorchPUFModel,
+    pair_accuracy as _pair_accuracy,
+    resolve_device as _resolve_device,
+)
 from .writer import save_ml_attack_report
+
+_ArbiterAgentTrainer = _arbiter.AgentTrainer
+_ArbiterTorchPUFModel = _arbiter.TorchPUFModel
+_OpticalAgentTrainer = _optical.AgentTrainer
+_OpticalTorchPUFModel = _optical.TorchPUFModel
+_optical_pair_accuracy = _optical.pair_accuracy
 
 DEFAULT_ATTACK_FAMILIES = (
     "optical",
@@ -31,119 +45,6 @@ DEFAULT_ATTACK_FAMILIES = (
 CLEAR_LINE = '\033[1A\x1b[2K'
 
 
-class _TorchPUFModel(Simulation):
-    """Adapt one or more PyTorch classifiers to pypuf's simulation interface."""
-
-    def __init__(self, models: Sequence[Any], n: int, response_bits: int, device: Any):
-        super().__init__()
-        self.models = list(models)
-        self._n = n
-        self._response_bits = response_bits
-        self.device = device
-
-    @property
-    def challenge_length(self) -> int:
-        return self._n
-
-    @property
-    def response_length(self) -> int:
-        return self._response_bits
-
-    def eval(self, challenges: np.ndarray) -> np.ndarray:
-        import torch
-
-        inputs = torch.as_tensor(challenges, dtype=torch.float32, device=self.device)
-        with torch.no_grad():
-            logits = torch.stack([model(inputs) for model in self.models]).mean(dim=0)
-            return torch.where(logits >= 0, 1, -1).to(torch.int8).cpu().numpy()
-
-
-class _AgentTrainer:
-    """Keep one model and optimizer alive while training it epoch by epoch."""
-
-    def __init__(
-        self,
-        challenges: np.ndarray,
-        responses: np.ndarray,
-        response_bits: int,
-        hidden_layers: int,
-        width: int,
-        seed: int,
-        batch_size: int,
-        learning_rate: float,
-        device: Any,
-    ):
-        import torch
-        from torch import nn
-
-        torch.manual_seed(seed)
-        if device.type == "xpu":
-            torch.xpu.manual_seed_all(seed)
-        layers: list[nn.Module] = []
-        for _ in range(hidden_layers):
-            input_size = challenges.shape[1] if not layers else width
-            layers.extend([nn.Linear(input_size, width), nn.Tanh()])
-        input_size = width if hidden_layers else challenges.shape[1]
-        layers.append(nn.Linear(input_size, response_bits))
-        self.model = nn.Sequential(*layers).to(device)
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=learning_rate, foreach=False
-        )
-        self.loss_function = nn.BCEWithLogitsLoss()
-        self.training_inputs = torch.as_tensor(
-            challenges, dtype=torch.float32, device=device
-        )
-        response_matrix = np.asarray(responses).reshape(len(responses), response_bits)
-        self.training_labels = torch.as_tensor(
-            (response_matrix + 1) / 2, dtype=torch.float32, device=device
-        )
-        self.batch_size = batch_size
-
-    def train_epoch(self) -> None:
-        import torch
-
-        self.model.train()
-        order = torch.randperm(len(self.training_inputs), device=self.training_inputs.device)
-        for start in range(0, len(order), self.batch_size):
-            indices = order[start:start + self.batch_size]
-            self.optimizer.zero_grad(set_to_none=True)
-            loss = self.loss_function(
-                self.model(self.training_inputs[indices]), self.training_labels[indices]
-            )
-            loss.backward()
-            self.optimizer.step()
-
-
-def _resolve_device(backend: str, device: Optional[int]) -> Any:
-    try:
-        import torch
-    except ImportError as error:
-        raise RuntimeError("PyTorch is required to train PUF attack models.") from error
-
-    normalized = backend.strip().lower()
-    if normalized not in {"auto", "cpu", "torch_xpu"}:
-        raise ValueError("backend must be 'auto', 'cpu', or 'torch_xpu'.")
-    xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
-    if normalized == "auto":
-        normalized = "torch_xpu" if xpu_available else "cpu"
-    if normalized == "torch_xpu":
-        if not xpu_available:
-            raise RuntimeError("torch_xpu requested, but a usable Intel XPU is unavailable.")
-        selected_device = 0 if device is None else device
-        if selected_device < 0 or selected_device >= torch.xpu.device_count():
-            raise ValueError(f"XPU device index {selected_device} is unavailable.")
-        return torch.device(f"xpu:{selected_device}")
-    if device is not None:
-        raise ValueError("device can only be set when backend='torch_xpu'.")
-    return torch.device("cpu")
-
-
-def _pair_accuracy(model: Simulation, dataset: ChallengeResponseSet) -> float:
-    predicted = np.asarray(model.eval(dataset.challenges))
-    expected = np.asarray(dataset.responses).reshape(len(dataset.challenges), -1)
-    return float(np.mean(np.all(predicted == expected, axis=1)))
-
-
 def _attack_one_puf(
     target: Simulation,
     n: int,
@@ -159,6 +60,7 @@ def _attack_one_puf(
     batch_size: int,
     learning_rate: float,
     device: Any,
+    family: str,
     print_progress: bool = False,
 ) -> Dict[str, Any]:
     training = ChallengeResponseSet.from_simulation(target, N=training_samples, seed=seed)
@@ -169,20 +71,66 @@ def _attack_one_puf(
     hidden_width = width or max(16, 2 * n)
     best_model: Optional[_TorchPUFModel] = None
     best_validation_accuracy = -1.0
-    selected_stage = "logistic_regression"
-    selected_depth = 0
-    selected_agent_count = 1
+    selected_stage = "neural_ensemble"
+    selected_depth = 1
+    selected_agent_count = agents
     fit_seconds = 0.0
     epochs_trained = 0
     agent_epochs_trained = 0
     threshold_reached = False
     stage_history: list[Dict[str, Any]] = []
 
-    stages = [(0, max(1,agents))] + [(layer_count, agents) for layer_count in range(1, max_depth + 1)]
+    family_key = family.strip().lower()
+    if family_key == "arbiter":
+        trainer_type = _ArbiterAgentTrainer
+        model_type = _ArbiterTorchPUFModel
+        stage_name = _arbiter.STAGE_NAME
+        pair_accuracy_fn = _pair_accuracy
+    elif family_key == "optical":
+        trainer_type = _OpticalAgentTrainer
+        model_type = _OpticalTorchPUFModel
+        stage_name = _optical.STAGE_NAME
+        pair_accuracy_fn = _optical_pair_accuracy
+    else:
+        trainer_type = _AgentTrainer
+        model_type = _TorchPUFModel
+        stage_name = "nonlinear_ensemble"
+        pair_accuracy_fn = _pair_accuracy
+
+    if family_key == "optical":
+        bootstrap_start = time.perf_counter()
+        bootstrap_layer = _optical.bootstrap_linear_model(
+            training.challenges, training.responses, target.response_length, device
+        )
+        best_model = model_type([bootstrap_layer], n, target.response_length, device)
+        best_validation_accuracy = pair_accuracy_fn(best_model, validation)
+        fit_seconds += time.perf_counter() - bootstrap_start
+        selected_stage = _optical.BOOTSTRAP_STAGE_NAME
+        selected_depth = 0
+        selected_agent_count = 1
+        stage_history.append({
+            "attack": _optical.BOOTSTRAP_STAGE_NAME,
+            "depth": 0,
+            "agents": 1,
+            "epochs": 1,
+            "validation_accuracy": best_validation_accuracy,
+            "fit_elapsed_seconds": time.perf_counter() - bootstrap_start,
+        })
+        if print_progress:
+            print(
+                "Closed-form linear regression validation accuracy "
+                f"{best_validation_accuracy:.4%}"
+            )
+        if best_validation_accuracy >= success_threshold:
+            threshold_reached = True
+
+    stages = [(layer_count, agents) for layer_count in range(1, max_depth + 1)]
     for depth, agent_count in stages:
+        if threshold_reached:
+            break
         trainers = []
         for agent_index in range(agent_count):
-            trainers.append(_AgentTrainer(
+            trainers.append(trainer_type(
                 training.challenges,
                 training.responses,
                 target.response_length,
@@ -195,7 +143,6 @@ def _attack_one_puf(
             ))
         if print_progress:
             print(f"Created {agent_count} trainers for depth {depth}.")
-        stage_name = "logistic_regression" if depth == 0 else "nonlinear_ensemble"
         stage_history.append({
             "attack": stage_name,
             "depth": depth,
@@ -208,10 +155,10 @@ def _attack_one_puf(
             epoch_start = time.perf_counter()
             for trainer in trainers:
                 trainer.train_epoch()
-            model = _TorchPUFModel(
+            model = model_type(
                 [trainer.model for trainer in trainers], n, target.response_length, device
             )
-            validation_accuracy = _pair_accuracy(model, validation)
+            validation_accuracy = pair_accuracy_fn(model, validation)
             elapsed = time.perf_counter() - epoch_start
             fit_seconds += elapsed
             epochs_trained += 1
@@ -231,7 +178,7 @@ def _attack_one_puf(
             if validation_accuracy > best_validation_accuracy:
                 import torch
 
-                best_model = _TorchPUFModel(
+                best_model = model_type(
                     [copy.deepcopy(trainer.model).cpu() for trainer in trainers],
                     n,
                     target.response_length,
@@ -250,14 +197,14 @@ def _attack_one_puf(
                 if print_progress:
                     print(
                         "Success threshold reached with validation accuracy "
-                        f"{validation_accuracy:.4f}"
+                        f"{validation_accuracy:.4%}"
                     )
                 break
             if stage_history[-1]["epochs"] >= epochs:
                 if print_progress:
                     print(
                         f"Maximum epochs reached for depth {depth} with validation "
-                        f"accuracy {validation_accuracy:.4f}"
+                        f"accuracy {validation_accuracy:.4%}"
                     )
                 break
         if threshold_reached:
@@ -266,7 +213,7 @@ def _attack_one_puf(
     if best_model is None:
         raise RuntimeError("No attack model was trained.")
     validation_accuracy = best_validation_accuracy
-    test_accuracy = _pair_accuracy(best_model, test)
+    test_accuracy = pair_accuracy_fn(best_model, test)
     return {
         "attack": selected_stage,
         "depth": selected_depth,
@@ -386,13 +333,13 @@ def run_ml_attack_experiment(
         raise ValueError("Dimensions, sample counts, epochs, and batch size must be positive.")
     if not 0.5 < success_threshold <= 1.0:
         raise ValueError("success_threshold must be greater than 0.5 and at most 1.0.")
-    if max_depth < 0 or agents < 1 or (width is not None and width < 1):
-        raise ValueError("max_depth must be nonnegative; agents and width must be positive.")
+    if max_depth < 1 or agents < 1 or (width is not None and width < 1):
+        raise ValueError("max_depth must be at least 1; agents and width must be positive.")
     training_device = _resolve_device(backend, device)
 
     results: Dict[str, Dict[str, Any]] = {}
     for family_index, family in enumerate(selected_families):
-        print(f"Attacking {family!r}...")
+        print(f"\nAttacking {family!r}...")
         instance_results = []
         for instance_index in range(puf_instances):
             print(f"Creating instance {instance_index + 1}/{puf_instances}...")
@@ -422,6 +369,7 @@ def run_ml_attack_experiment(
                 batch_size,
                 learning_rate,
                 training_device,
+                family,
                 print_progress,
             )
             instance_result.update({
