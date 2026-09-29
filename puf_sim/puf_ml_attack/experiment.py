@@ -86,6 +86,11 @@ def _attack_one_puf(
         model_type = _ArbiterTorchPUFModel
         stage_name = _arbiter.STAGE_NAME
         pair_accuracy_fn = _pair_accuracy
+    elif family_key in {"ff_apuf", "feed_forward_arbiter"}:
+        trainer_type = _arbiter.FeedForwardAgentTrainer
+        model_type = _TorchPUFModel
+        stage_name = _arbiter.FEED_FORWARD_STAGE_NAME
+        pair_accuracy_fn = _pair_accuracy
     elif family_key == "optical":
         trainer_type = _OpticalAgentTrainer
         model_type = _OpticalTorchPUFModel
