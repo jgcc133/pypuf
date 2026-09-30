@@ -87,9 +87,19 @@ def _attack_one_puf(
         stage_name = _arbiter.STAGE_NAME
         pair_accuracy_fn = _pair_accuracy
     elif family_key in {"ff_apuf", "feed_forward_arbiter"}:
-        trainer_type = _arbiter.FeedForwardAgentTrainer
+        trainer_type = _arbiter.feed_forward.AgentTrainer
         model_type = _TorchPUFModel
-        stage_name = _arbiter.FEED_FORWARD_STAGE_NAME
+        stage_name = _arbiter.feed_forward.STAGE_NAME
+        pair_accuracy_fn = _pair_accuracy
+    elif family_key in {"xor_apuf", "xor_arbiter"}:
+        trainer_type = _arbiter.xor_apuf.AgentTrainer
+        model_type = _arbiter.xor_apuf.XorTorchPUFModel
+        stage_name = _arbiter.xor_apuf.STAGE_NAME
+        pair_accuracy_fn = _pair_accuracy
+    elif family_key == "interpose":
+        trainer_type = _arbiter.interpose.AgentTrainer
+        model_type = _arbiter.interpose.InterposeTorchPUFModel
+        stage_name = _arbiter.interpose.STAGE_NAME
         pair_accuracy_fn = _pair_accuracy
     elif family_key == "optical":
         trainer_type = _OpticalAgentTrainer
@@ -129,13 +139,17 @@ def _attack_one_puf(
         if best_validation_accuracy >= success_threshold:
             threshold_reached = True
 
-    stages = [(layer_count, agents) for layer_count in range(1, max_depth + 1)]
+    stages = (
+        [(1, agents)]
+        if family_key in {"xor_apuf", "xor_arbiter", "interpose"}
+        else [(layer_count, agents) for layer_count in range(1, max_depth + 1)]
+    )
     for depth, agent_count in stages:
         if threshold_reached:
             break
         trainers = []
         for agent_index in range(agent_count):
-            trainers.append(trainer_type(
+            trainer_arguments = (
                 training.challenges,
                 training.responses,
                 target.response_length,
@@ -145,7 +159,17 @@ def _attack_one_puf(
                 batch_size,
                 learning_rate,
                 device,
-            ))
+            )
+            if family_key in {"xor_apuf", "xor_arbiter"}:
+                trainers.append(trainer_type(*trainer_arguments, chain_count=target.k))
+            elif family_key == "interpose":
+                trainers.append(trainer_type(
+                    *trainer_arguments,
+                    down_chain_count=target.down.k,
+                    interpose_pos=target.interpose_pos,
+                ))
+            else:
+                trainers.append(trainer_type(*trainer_arguments))
         if print_progress:
             print(f"Created {agent_count} trainers for depth {depth}.")
         stage_history.append({

@@ -6,6 +6,15 @@ import numpy as np
 
 import puf_sim.puf_ml_attack.experiment as experiment
 from puf_sim.puf_ml_attack.experiment import _pair_accuracy
+from puf_sim.puf_ml_attack.arbiter.xor_apuf import (
+    XorTorchPUFModel,
+    _XorParityModel,
+)
+from puf_sim.puf_ml_attack.arbiter.interpose import (
+    InterposeCore,
+    InterposeTorchPUFModel,
+)
+from puf_sim.puf_implementations import create_puf
 from puf_sim.puf_ml_attack.writer import save_ml_attack_report
 
 
@@ -30,6 +39,56 @@ def test_pair_accuracy_flattens_responses():
     )
 
     assert _pair_accuracy(EchoModel(), dataset) == 1.0
+
+
+def test_xor_inference_applies_training_feature_map():
+    import torch
+
+    puf = create_puf("xor_apuf", n=8, seed=17, k=2)
+    challenges = np.array([
+        [1, -1, 1, -1, 1, -1, 1, -1],
+        [-1, 1, -1, 1, -1, 1, -1, 1],
+        [1, 1, -1, -1, 1, 1, -1, -1],
+    ], dtype=np.int8)
+    model = _XorParityModel(8, puf.k, seed=0)
+    with torch.no_grad():
+        model.chain_logits.weight.copy_(
+            torch.as_tensor(puf.weight_array[:, :-1], dtype=torch.float32)
+        )
+        model.chain_logits.bias.copy_(
+            torch.as_tensor(puf.weight_array[:, -1], dtype=torch.float32)
+        )
+    attack_model = XorTorchPUFModel([model], 8, 1, torch.device("cpu"))
+
+    assert np.array_equal(
+        attack_model.eval(challenges).reshape(-1), puf.eval(challenges).reshape(-1)
+    )
+
+
+def test_interpose_model_matches_simulator_with_target_weights():
+    import torch
+
+    puf = create_puf("interpose", n=12, seed=27, k=2, interpose_pos=5)
+    challenges = np.random.default_rng(28).choice((-1, 1), size=(32, 12)).astype(np.int8)
+    model = InterposeCore(12, puf.down.k, puf.interpose_pos, seed=0)
+    with torch.no_grad():
+        model.up_weights.weight.copy_(
+            torch.as_tensor(puf.up.weight_array[:, :-1], dtype=torch.float32)
+        )
+        model.up_weights.bias.copy_(
+            torch.as_tensor(puf.up.weight_array[:, -1], dtype=torch.float32)
+        )
+        model.down_weights.weight.copy_(
+            torch.as_tensor(puf.down.weight_array[:, :-1], dtype=torch.float32)
+        )
+        model.down_weights.bias.copy_(
+            torch.as_tensor(puf.down.weight_array[:, -1], dtype=torch.float32)
+        )
+    attack_model = InterposeTorchPUFModel([model], 12, 1, torch.device("cpu"))
+
+    assert np.array_equal(
+        attack_model.eval(challenges).reshape(-1), puf.eval(challenges).reshape(-1)
+    )
 
 
 def test_train_until_threshold_reports_effort(monkeypatch, capsys):
@@ -128,7 +187,7 @@ def test_epoch_limit_applies_at_each_depth(monkeypatch):
         validation_samples=1,
         test_samples=1,
         seed=10,
-        family="xor_apuf",
+        family="ring_oscillator",
         success_threshold=1.0,
         max_depth=2,
         agents=2,
