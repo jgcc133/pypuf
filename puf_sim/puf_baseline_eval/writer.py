@@ -85,7 +85,16 @@ def save_baseline_report(
         writer.writeheader()
         for family, report in results.items():
             row = {"family": family}
-            row.update({key: _summary_value(value) for key, value in report.items()})
+            row.update({
+                key: _summary_value(value)
+                for key, value in report.items()
+                if key != "bit_aliasing"
+            })
+
+            if "bit_aliasing" in report:
+                values = np.asarray(report["bit_aliasing"]).reshape(-1)
+                row["bit_aliasing"] = str(values.tolist())
+
             writer.writerow(row)
 
     return report_directory

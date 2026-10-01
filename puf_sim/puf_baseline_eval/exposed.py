@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 
-from pypuf.io import ChallengeResponseSet
+from pypuf.io import ChallengeResponseSet, random_inputs
 from pypuf.metrics import (
     accuracy,
     bias,
@@ -18,6 +18,50 @@ from pypuf.metrics import (
     uniqueness,
 )
 from pypuf.simulation import Simulation
+
+
+class NormalizedResponseSimulation(Simulation):
+    """Wrap a continuous-response simulation to expose bipolar ``{-1, 1}`` responses.
+
+    Every metric in :mod:`pypuf.metrics` assumes responses in ``{-1, 1}``.
+    Simulations with unbounded, non-negative outputs (e.g. the Optical PUF's
+    intensity values) break those formulas silently instead of raising an
+    error. This wrapper calibrates a per-response-bit median threshold from a
+    sample of challenges, then binarizes every later ``eval`` call against it.
+    """
+
+    def __init__(self, instance: Simulation, seed: int = 0, calibration_samples: int = 1000) -> None:
+        super().__init__()
+        self._instance = instance
+        calibration_challenges = random_inputs(
+            n=instance.challenge_length, N=calibration_samples, seed=seed
+        )
+        calibration_responses = np.asarray(instance.eval(calibration_challenges), dtype=float)
+        self._threshold = np.median(calibration_responses, axis=0)
+
+    @property
+    def challenge_length(self) -> int:
+        return self._instance.challenge_length
+
+    @property
+    def response_length(self) -> int:
+        return self._instance.response_length
+
+    def eval(self, challenges: np.ndarray) -> np.ndarray:
+        responses = np.asarray(self._instance.eval(challenges), dtype=float)
+        return np.where(responses >= self._threshold, 1, -1).astype(np.int8)
+
+
+def normalize_to_bipolar(
+    instance: Simulation, seed: int = 0, calibration_samples: int = 1000
+) -> Simulation:
+    """Return a bipolar-response wrapper for continuous-output simulations like the Optical PUF.
+
+    Pass the result to :func:`evaluate_exposed_api` (or
+    :func:`puf_sim.puf_baseline_eval.report.evaluate_exposed_metrics`) instead
+    of the raw instance so every metric operates on ``{-1, 1}`` responses.
+    """
+    return NormalizedResponseSimulation(instance, seed=seed, calibration_samples=calibration_samples)
 
 
 def evaluate_exposed_api(
@@ -83,4 +127,4 @@ def evaluate_exposed_api(
     return result
 
 
-__all__ = ["evaluate_exposed_api"]
+__all__ = ["evaluate_exposed_api", "NormalizedResponseSimulation", "normalize_to_bipolar"]

@@ -188,6 +188,22 @@ def _attack_one_puf(
                 [trainer.model for trainer in trainers], n, target.response_length, device
             )
             validation_accuracy = pair_accuracy_fn(model, validation)
+            candidate_trainer_models = [[trainer.model for trainer in trainers]]
+            candidate_accuracies = [validation_accuracy]
+            if agent_count > 1:
+                # Restarts can converge to disagreeing local optima; averaging
+                # their logits then cancels a confident correct agent against
+                # a confident-but-wrong one. Also consider each agent alone so
+                # one straggler cannot cap the whole ensemble's accuracy.
+                for trainer in trainers:
+                    solo_model = model_type([trainer.model], n, target.response_length, device)
+                    candidate_trainer_models.append([trainer.model])
+                    candidate_accuracies.append(pair_accuracy_fn(solo_model, validation))
+            best_candidate_index = max(
+                range(len(candidate_accuracies)), key=candidate_accuracies.__getitem__
+            )
+            selected_trainer_models = candidate_trainer_models[best_candidate_index]
+            validation_accuracy = candidate_accuracies[best_candidate_index]
             elapsed = time.perf_counter() - epoch_start
             fit_seconds += elapsed
             epochs_trained += 1
@@ -208,7 +224,7 @@ def _attack_one_puf(
                 import torch
 
                 best_model = model_type(
-                    [copy.deepcopy(trainer.model).cpu() for trainer in trainers],
+                    [copy.deepcopy(trainer_model).cpu() for trainer_model in selected_trainer_models],
                     n,
                     target.response_length,
                     torch.device("cpu"),
@@ -216,10 +232,10 @@ def _attack_one_puf(
                 best_validation_accuracy = validation_accuracy
                 selected_stage = stage_name
                 selected_depth = depth
-                selected_agent_count = agent_count
+                selected_agent_count = len(selected_trainer_models)
                 selected_stage = stage_name
                 selected_depth = depth
-                selected_agent_count = agent_count
+                selected_agent_count = len(selected_trainer_models)
 
             if validation_accuracy >= success_threshold:
                 threshold_reached = True

@@ -77,19 +77,20 @@ def hamming_distance_distribution(responses: np.ndarray, backend: Backend | None
     return backend.asnumpy(xp.concatenate(pair_distances))
 
 
-def bit_aliasing(responses: np.ndarray, backend: Backend | None = None) -> float:
-    """Return mean absolute response-bit bias; zero is ideal.
-
-    ``responses`` must have shape ``(devices, challenges, response_bits)``.
-    """
+def bit_aliasing(responses: np.ndarray, backend: Backend | None = None) -> np.ndarray:
+    """Return the fraction of 1 responses for each output bit; 0.5 is balanced."""
     backend = backend or get_backend("numpy")
     xp = backend.xp
     values = backend.asarray(responses)
     if values.ndim != 3:
         raise ValueError("Bit aliasing expects (devices, challenges, response_bits).")
-    values = backend.astype(xp.where(values >= 0, 1, -1), xp.float32)
-    return float(backend.asnumpy(xp.mean(xp.abs(xp.mean(values, axis=(0, 1))))))
 
+    values = xp.where(values >= 0, 1, -1)
+    probability_one = xp.mean(
+        backend.astype(values == 1, xp.float32),
+        axis=(0, 1),
+    )
+    return backend.asnumpy(probability_one)
 
 def probability_of_misidentification(responses: np.ndarray, backend: Backend | None = None) -> float:
     """Return the average complete-response impostor collision probability."""

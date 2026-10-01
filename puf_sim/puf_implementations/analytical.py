@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from pypuf.io import random_inputs
 from pypuf.simulation import Simulation
 
 from puf_sim.puf_backend import Backend
@@ -104,14 +105,28 @@ class MemristivePUF(Simulation):
 class SiliconPhotonicPUF(Simulation):
     """Analytical silicon-photonic PUF based on a complex transfer matrix."""
 
-    def __init__(self, n: int, response_bits: int = 1, seed: int = 0) -> None:
+    def __init__(
+        self,
+        n: int,
+        response_bits: int = 1,
+        seed: int = 0,
+        calibration_samples: int = 1000,
+        calibration_seed: int = 0,
+    ) -> None:
+
         self.n = n
         self.m = response_bits
         rng = np.random.default_rng(seed)
         amplitude = rng.uniform(0.1, 1.0, size=(n, response_bits))
         phase = rng.uniform(0.0, 2.0 * np.pi, size=(n, response_bits))
         self.transfer_matrix = amplitude * np.exp(1j * phase)
-        self.reference = rng.normal(0.0, 0.25, size=response_bits)
+
+        calibration_challenges = random_inputs(
+            n=n, N=calibration_samples, seed=calibration_seed
+        )
+        calibration_field = calibration_challenges @ self.transfer_matrix
+        calibration_intensity = np.abs(calibration_field) ** 2
+        self.reference = np.median(calibration_intensity, axis=0)
 
     @property
     def challenge_length(self) -> int:

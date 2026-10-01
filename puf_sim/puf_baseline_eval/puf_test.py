@@ -10,6 +10,7 @@ from pypuf.io import ChallengeResponseSet
 from pypuf.simulation import Simulation
 
 from puf_sim.puf_implementations import create_puf
+from .exposed import normalize_to_bipolar
 from .report import evaluate_exposed_metrics
 from .writer import save_baseline_report
 
@@ -27,6 +28,24 @@ DEFAULT_PUF_FAMILIES = (
 )
 DEFAULT_INSTANCE_COUNT = 100
 
+def _prepare_population_for_metrics(
+    population: list[Simulation],
+    family: str,
+    calibration_seed: int,
+    calibration_samples: int = 1000,
+) -> list[Simulation]:
+    family_key = family.strip().lower().replace("-", "_").replace(" ", "_")
+    if family_key != "optical":
+        return population
+
+    return [
+        normalize_to_bipolar(
+            puf,
+            seed=calibration_seed + index,
+            calibration_samples=calibration_samples,
+        )
+        for index, puf in enumerate(population)
+    ]
 
 def _evaluate_family(
     family_index: int,
@@ -57,6 +76,12 @@ def _evaluate_family(
         )
         for device_index in range(instances_per_family)
     ]
+    population = _prepare_population_for_metrics(
+        population,
+        family,
+        calibration_seed=seed + family_index * instances_per_family,
+    )
+
     report = evaluate_exposed_metrics(
         population[0],
         instances=population,
